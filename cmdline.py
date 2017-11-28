@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-from typing import Tuple
+from typing import Optional, Tuple
 
 import blessed
 import codecs
@@ -143,6 +143,14 @@ class _File:
         if self.encoding is None:
             self.encoding = 'utf-8'
 
+        mode, accmode = self._determine_mode(mode)
+
+        mode, accmode = self._maybe_raw_from_fd(mode, accmode)
+        mode, accmode = self._maybe_bytes_from_raw(mode, accmode)
+        self._maybe_text_from_bytes(mode, accmode)
+
+    def _determine_mode(self, mode: Optional[str]) -> Tuple[str, int]:
+
         if mode is None:
             accmode = (os.O_RDWR if self.fd is None
                        else fcntl.fcntl(self.fd, fcntl.F_GETFL) & os.O_ACCMODE)
@@ -153,9 +161,7 @@ class _File:
             if 'b' not in mode:
                 mode += 'b'
 
-        mode, accmode = self._maybe_raw_from_fd(mode, accmode)
-        mode, accmode = self._maybe_bytes_from_raw(mode, accmode)
-        self._maybe_text_from_bytes(mode, accmode)
+        return mode, accmode
 
     def _maybe_raw_from_fd(self, mode: str, accmode: int) -> Tuple[str, int]:
 
