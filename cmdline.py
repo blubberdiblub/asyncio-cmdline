@@ -132,6 +132,18 @@ class _File:
         except AttributeError:
             self.isatty = os.isatty(self.fd) if self.fd is not None else False
 
+        self.encoding = None
+
+        self._determine_encoding(encoding)
+
+        mode, accmode = self._determine_mode(mode)
+
+        mode, accmode = self._maybe_raw_from_fd(mode, accmode)
+        mode, accmode = self._maybe_bytes_from_raw(mode, accmode)
+        self._maybe_text_from_bytes(mode, accmode)
+
+    def _determine_encoding(self, encoding: Optional[str]) -> None:
+
         self.encoding = encoding
 
         if self.encoding is None and self.text is not None:
@@ -142,12 +154,6 @@ class _File:
 
         if self.encoding is None:
             self.encoding = 'utf-8'
-
-        mode, accmode = self._determine_mode(mode)
-
-        mode, accmode = self._maybe_raw_from_fd(mode, accmode)
-        mode, accmode = self._maybe_bytes_from_raw(mode, accmode)
-        self._maybe_text_from_bytes(mode, accmode)
 
     def _determine_mode(self, mode: Optional[str]) -> Tuple[str, int]:
 
