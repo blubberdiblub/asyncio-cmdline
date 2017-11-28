@@ -69,7 +69,11 @@ def _accmode(mode: str) -> int:
 
 class _File:
 
-    def __init__(self, filelike: io.IOBase, encoding: str = None) -> None:
+    def __init__(
+            self, filelike: io.IOBase,
+            mode: str = None,
+            encoding: str = None,
+    ) -> None:
 
         if not isinstance(filelike, io.IOBase):
             raise TypeError("must be a file-like object")
@@ -139,38 +143,72 @@ class _File:
         if self.encoding is None:
             self.encoding = 'utf-8'
 
-        accmode = (os.O_RDWR if self.fd is None
-                   else fcntl.fcntl(self.fd, fcntl.F_GETFL) & os.O_ACCMODE)
-        mode = ('rb', 'wb', 'r+b')[accmode]
+        if mode is None:
+            accmode = (os.O_RDWR if self.fd is None
+                       else fcntl.fcntl(self.fd, fcntl.F_GETFL) & os.O_ACCMODE)
+            mode = ('rb', 'wb', 'r+b')[accmode]
 
-        if self.raw is None and self.fd is not None:
-            self.raw = io.open(f"<fd #{self.fd}>",
-                               mode=mode,
-                               buffering=0,
-                               closefd=False,
-                               opener=lambda path, flags: self.fd)
+        else:
+            accmode = _accmode(mode)
+            if 'b' not in mode:
+                mode += 'b'
 
-        if self.raw is not None:
+        if self.fd is not None:
+            if (self.raw is None or
+                    not hasattr(self.raw, 'mode') or
+                    _accmode(self.raw.mode) != accmode):
+
+                self.raw = io.open(self.fd,
+                                   mode=mode,
+                                   buffering=0,
+                                   closefd=False,
+                                   opener=lambda path, flags: self.fd)
+
+        elif self.raw is not None:
             try:
                 mode = self.raw.mode
 
             except AttributeError:
                 pass
 
-        if self.bytes is None and self.raw is not None:
-            buffered_io = (
-                io.BufferedReader,
-                io.BufferedWriter,
-                io.BufferedRandom,
-            )[_accmode(mode)]
+            else:
+                accmode = _accmode(mode)
 
-            self.bytes = buffered_io(self.raw)
+        if self.raw is not None:
+            if (self.bytes is None or
+                    not hasattr(self.bytes, 'mode') or
+                    _accmode(self.bytes.mode) != accmode):
 
-        if self.text is None and self.bytes is not None:
-            self.text = io.TextIOWrapper(self.bytes,
-                                         encoding=self.encoding,
-                                         errors='replace' if self.isatty else 'strict',
-                                         line_buffering=True)
+                buffered_io = (
+                    io.BufferedReader,
+                    io.BufferedWriter,
+                    io.BufferedRandom,
+                )[accmode]
+
+                if accmode == os.O_RDWR and not self.raw.seekable():
+                    self.bytes = io.BufferedRWPair(self.raw, self.raw)
+                else:
+                    self.bytes = buffered_io(self.raw)
+
+        elif self.bytes is not None:
+            try:
+                mode = self.bytes.mode
+
+            except AttributeError:
+                pass
+
+            else:
+                accmode = _accmode(mode)
+
+        if self.bytes is not None:
+            if (self.text is None or
+                    not hasattr(self.text, 'mode') or
+                    _accmode(self.text.mode) != accmode):
+
+                self.text = io.TextIOWrapper(self.bytes,
+                                             encoding=self.encoding,
+                                             errors='replace' if self.isatty else 'strict',
+                                             line_buffering=True)
 
     def __eq__(self, other: '_File') -> bool:
 
@@ -224,8 +262,8 @@ class _CmdLineTransport(Transport):
         self._protocol = protocol
 
         import sys
-        self._input = _File(sys.__stdin__)
-        self._output = _File(sys.__stdout__)
+        self._input = _File(sys.__stdin__, mode='r')
+        self._output = _File(sys.__stdout__, mode='w')
 
         self._input_decoder = codecs.getincrementaldecoder(self._input.encoding)(errors='ignore')
         self._input_buf = []
@@ -255,7 +293,7 @@ class _CmdLineTransport(Transport):
                         stream=self._input.tty_file(mode='w'),
                 )
 
-            self._echo = _File(self._terminal.stream)
+            self._echo = _File(self._terminal.stream, mode='w')
 
         self._loop.call_soon(self._protocol.connection_made, self)
         self._loop.call_soon(self._add_reader)
