@@ -200,15 +200,34 @@ class _File:
             else:
                 accmode = _accmode(mode)
 
+        self._maybe_text_from_bytes(mode, accmode)
+
+    def _maybe_text_from_bytes(self, mode: str, accmode: int) -> Tuple[str,
+                                                                       int]:
+
         if self.bytes is not None:
             if (self.text is None or
                     not hasattr(self.text, 'mode') or
                     _accmode(self.text.mode) != accmode):
 
-                self.text = io.TextIOWrapper(self.bytes,
-                                             encoding=self.encoding,
-                                             errors='replace' if self.isatty else 'strict',
-                                             line_buffering=True)
+                self.text = io.TextIOWrapper(
+                        self.bytes,
+                        encoding=self.encoding,
+                        errors='replace' if self.isatty else 'strict',
+                        line_buffering=True,
+                )
+
+        elif self.text is not None:
+            try:
+                mode = self.text.mode
+
+            except AttributeError:
+                pass
+
+            else:
+                accmode = _accmode(mode)
+
+        return mode, accmode
 
     def __eq__(self, other: '_File') -> bool:
 
