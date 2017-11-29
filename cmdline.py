@@ -78,24 +78,7 @@ class _File:
         if not isinstance(filelike, io.IOBase):
             raise TypeError("must be a file-like object")
 
-        if (isinstance(filelike, io.TextIOBase) or
-                hasattr(filelike, 'encoding')):
-
-            self.text = filelike
-
-            try:
-                filelike = filelike.buffer
-
-            except AttributeError:
-                try:
-                    filelike = filelike.raw
-
-                except AttributeError:
-                    pass
-
-        else:
-            self.text = None
-
+        filelike = self._maybe_text(filelike)
         filelike = self._maybe_bytes(filelike)
         self._maybe_raw(filelike)
         self._maybe_fd(filelike)
@@ -115,6 +98,28 @@ class _File:
         mode, accmode = self._maybe_raw_from_fd(mode, accmode)
         mode, accmode = self._maybe_bytes_from_raw(mode, accmode)
         self._maybe_text_from_bytes(mode, accmode)
+
+    def _maybe_text(self, filelike: io.IOBase) -> io.IOBase:
+
+        if (isinstance(filelike, io.TextIOBase) or
+                hasattr(filelike, 'encoding')):
+
+            self.text = filelike
+
+            try:
+                filelike = filelike.buffer
+
+            except AttributeError:
+                try:
+                    filelike = filelike.raw
+
+                except AttributeError:
+                    pass
+
+        else:
+            self.text = None
+
+        return filelike
 
     def _maybe_bytes(self, filelike: io.IOBase) -> io.IOBase:
 
