@@ -344,7 +344,7 @@ class _CmdLineTransport(Transport):
         if self._input.isatty:
             self._saved_attr = termios.tcgetattr(self._input.fd)
             attr = termios.tcgetattr(self._input.fd)
-            attr[3] = attr[3] & ~(termios.ICANON)
+            attr[3] &= ~termios.ICANON
             attr[6][termios.VMIN] = 1
             attr[6][termios.VTIME] = 0
             termios.tcsetattr(self._input.fd, termios.TCSADRAIN, attr)
