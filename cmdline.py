@@ -322,8 +322,12 @@ class _File:
 
 
 class _CmdLineTransport(Transport):
-
-    def __init__(self, loop: AbstractEventLoop, protocol: Protocol) -> None:
+    def __init__(self,
+                 loop: AbstractEventLoop,
+                 protocol: Protocol,
+                 input_handler,
+                 output_handler,
+                 ) -> None:
 
         super().__init__()
 
@@ -507,13 +511,34 @@ class _CmdLineTransport(Transport):
         assert False
 
 
-@coroutine
-def connect_console(protocol_factory, loop: AbstractEventLoop) -> Tuple[
-    BaseTransport,
-    Protocol,
-]:
+class DumbOutput:
 
-    transport = _CmdLineTransport(loop=loop, protocol=protocol_factory())
+    def __init__(self, loop: AbstractEventLoop):
+        self._loop = loop
+
+
+class DumbInput:
+
+    def __init__(self, loop: AbstractEventLoop):
+        self._loop = loop
+
+
+@coroutine
+def connect_console(
+        protocol_factory,
+        loop: AbstractEventLoop,
+        input_factory=DumbInput,
+        output_factory=DumbOutput,
+) -> Tuple[BaseTransport, Protocol]:
+
+    output_handler = output_factory(loop=loop)
+    input_handler = input_factory(loop=loop)
+    transport = _CmdLineTransport(
+        loop=loop,
+        protocol=protocol_factory(),
+        input_handler=input_handler,
+        output_handler=output_handler,
+    )
     return transport, transport.get_protocol()
 
 
@@ -542,6 +567,9 @@ def _main():
             self._transport.write_eof()
 
     connector_coroutine = connect_console(_DebugProtocol, loop=loop)
+    # connector_coroutine = connect_console(_DebugProtocol, loop=loop,
+    #                                       input_factory=DumbInput,
+    #                                       output_factory=DumbOutput)
 
     transport, protocol = loop.run_until_complete(connector_coroutine)
 
