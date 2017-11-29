@@ -73,6 +73,7 @@ class _File:
             self, filelike: io.IOBase,
             mode: str = None,
             encoding: str = None,
+            non_blocking: bool = False,
     ) -> None:
 
         if not isinstance(filelike, io.IOBase):
@@ -92,6 +93,9 @@ class _File:
         self.encoding = None
 
         self._determine_encoding(encoding)
+
+        if non_blocking and self.fd is not None and os.get_blocking(self.fd):
+            os.set_blocking(self.fd, False)
 
         mode, accmode = self._determine_mode(mode)
 
@@ -327,7 +331,7 @@ class _CmdLineTransport(Transport):
         self._protocol = protocol
 
         import sys
-        self._input = _File(sys.__stdin__, mode='r')
+        self._input = _File(sys.__stdin__, mode='r', non_blocking=True)
         self._output = _File(sys.__stdout__, mode='w')
 
         self._input_decoder = codecs.getincrementaldecoder(self._input.encoding)(errors='ignore')
