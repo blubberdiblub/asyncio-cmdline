@@ -111,6 +111,7 @@ class _File:
 
             except AttributeError:
                 try:
+                    # noinspection PyUnresolvedReferences
                     filelike = filelike.raw
 
                 except AttributeError:
@@ -131,6 +132,7 @@ class _File:
             self.bytes = filelike
 
             try:
+                # noinspection PyUnresolvedReferences
                 filelike = filelike.raw
 
             except AttributeError:
@@ -189,6 +191,7 @@ class _File:
     def _maybe_raw_from_fd(self, mode: str, accmode: int) -> Tuple[str, int]:
 
         if self.fd is not None:
+            # noinspection PyUnresolvedReferences
             if (self.raw is None or
                     not hasattr(self.raw, 'mode') or
                     _accmode(self.raw.mode) != accmode):
@@ -201,6 +204,7 @@ class _File:
 
         elif self.raw is not None:
             try:
+                # noinspection PyUnresolvedReferences
                 mode = self.raw.mode
 
             except AttributeError:
@@ -246,6 +250,7 @@ class _File:
                                                                        int]:
 
         if self.bytes is not None:
+            # noinspection PyUnresolvedReferences
             if (self.text is None or
                     not hasattr(self.text, 'mode') or
                     _accmode(self.text.mode) != accmode):
@@ -259,6 +264,7 @@ class _File:
 
         elif self.text is not None:
             try:
+                # noinspection PyUnresolvedReferences
                 mode = self.text.mode
 
             except AttributeError:
