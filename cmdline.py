@@ -96,22 +96,7 @@ class _File:
         else:
             self.text = None
 
-        if (isinstance(filelike, io.BufferedIOBase) or
-                hasattr(filelike, 'read1') or
-                (not hasattr(filelike, 'encoding') and
-                     hasattr(filelike, 'detach'))):
-
-            self.bytes = filelike
-
-            try:
-                filelike = filelike.raw
-
-            except AttributeError:
-                pass
-
-        else:
-            self.bytes = None
-
+        filelike = self._maybe_bytes(filelike)
         self._maybe_raw(filelike)
         self._maybe_fd(filelike)
 
@@ -130,6 +115,26 @@ class _File:
         mode, accmode = self._maybe_raw_from_fd(mode, accmode)
         mode, accmode = self._maybe_bytes_from_raw(mode, accmode)
         self._maybe_text_from_bytes(mode, accmode)
+
+    def _maybe_bytes(self, filelike: io.IOBase) -> io.IOBase:
+
+        if (isinstance(filelike, io.BufferedIOBase) or
+                hasattr(filelike, 'read1') or
+                (not hasattr(filelike, 'encoding') and
+                     hasattr(filelike, 'detach'))):
+
+            self.bytes = filelike
+
+            try:
+                filelike = filelike.raw
+
+            except AttributeError:
+                pass
+
+        else:
+            self.bytes = None
+
+        return filelike
 
     def _maybe_raw(self, filelike: io.IOBase) -> None:
 
