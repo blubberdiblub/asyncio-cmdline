@@ -120,11 +120,7 @@ class _File:
         else:
             self.raw = None
 
-        try:
-            self.fd = filelike.fileno()
-
-        except (AttributeError, OSError):
-            self.fd = None
+        self._maybe_fd(filelike)
 
         try:
             self.isatty = filelike.isatty()
@@ -141,6 +137,14 @@ class _File:
         mode, accmode = self._maybe_raw_from_fd(mode, accmode)
         mode, accmode = self._maybe_bytes_from_raw(mode, accmode)
         self._maybe_text_from_bytes(mode, accmode)
+
+    def _maybe_fd(self, filelike: io.IOBase) -> None:
+
+        try:
+            self.fd = filelike.fileno()
+
+        except (AttributeError, OSError):
+            self.fd = None
 
     def _determine_encoding(self, encoding: Optional[str]) -> None:
 
