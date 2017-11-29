@@ -112,14 +112,7 @@ class _File:
         else:
             self.bytes = None
 
-        if (isinstance(filelike, io.RawIOBase) or
-                not hasattr(filelike, 'detach')):
-
-            self.raw = filelike
-
-        else:
-            self.raw = None
-
+        self._maybe_raw(filelike)
         self._maybe_fd(filelike)
 
         try:
@@ -137,6 +130,16 @@ class _File:
         mode, accmode = self._maybe_raw_from_fd(mode, accmode)
         mode, accmode = self._maybe_bytes_from_raw(mode, accmode)
         self._maybe_text_from_bytes(mode, accmode)
+
+    def _maybe_raw(self, filelike: io.IOBase) -> None:
+
+        if (isinstance(filelike, io.RawIOBase) or
+                not hasattr(filelike, 'detach')):
+
+            self.raw = filelike
+
+        else:
+            self.raw = None
 
     def _maybe_fd(self, filelike: io.IOBase) -> None:
 
