@@ -307,7 +307,7 @@ class _File:
 
         return stat1.st_dev == stat2.st_dev and stat1.st_ino == stat2.st_ino
 
-    def tty_file(self, mode='w+') -> io.TextIOWrapper:
+    def tty_file(self, mode: str = 'w+') -> io.TextIOBase:
 
         if not self.isatty:
             raise TypeError("must be a tty")
