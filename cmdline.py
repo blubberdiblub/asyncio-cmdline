@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Type
 
 import blessed
 import codecs
