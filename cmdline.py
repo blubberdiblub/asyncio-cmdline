@@ -511,34 +511,223 @@ class _CmdLineTransport(Transport):
         assert False
 
 
-class DumbOutput:
+class _CmdLineOutput:
 
-    def __init__(self, loop: AbstractEventLoop):
+    def __init__(self, loop: AbstractEventLoop, output: _File) -> None:
+
+        super().__init__()
+
         self._loop = loop
+        self._output = output
+
+    def close(self) -> None:
+
+        self._loop = None
+        self._output = None
 
 
-class DumbInput:
+class DumbOutput(_CmdLineOutput):
 
-    def __init__(self, loop: AbstractEventLoop):
+    def __init__(self, loop: AbstractEventLoop, output: _File) -> None:
+
+        super().__init__(loop=loop, output=output)
+
+        encoder_factory = codecs.getincrementalencoder(self._output.encoding)
+        self._output_encoder = encoder_factory(errors='ignore')
+        self._output_buf = deque()
+
+    def _add_writer(self) -> None:
+
+        try:
+            import sys
+            print("adding writer", file=sys.stderr, flush=True)
+
+            self._loop.add_writer(self._output.fd, self._output_available)
+
+        except PermissionError:
+            # FIXME: handle case when file descriptor cannot be watched
+
+            import sys
+            print("output file descriptor cannot be watched", file=sys.stderr,
+                  flush=True)
+
+    def _output_available(self) -> None:
+
+        if not self._output_buf:
+            self._loop.remove_writer(self._output.fd)
+
+            import sys
+            print("fsync", file=sys.stderr, flush=True)
+
+            try:
+                os.fsync(self._output.fd)
+
+            except OSError:
+                pass
+
+            return
+
+        raw_data = self._output_buf.popleft()
+        if not raw_data:
+            import sys
+            print("data empty", file=sys.stderr, flush=True)
+
+            return
+
+        bytes_written = os.write(self._output.fd, raw_data[:4096])
+        assert 0 <= bytes_written <= len(raw_data)
+
+        if bytes_written >= len(raw_data):
+            import sys
+            print(f"complete write ({bytes_written})", file=sys.stderr,
+                  flush=True)
+
+            return
+
+        import sys
+        print(f"incomplete write ({bytes_written})", file=sys.stderr,
+              flush=True)
+
+        self._output_buf.appendleft(raw_data[bytes_written:])
+
+    def write_eof(self):
+
+        raw_data = self._output_encoder.encode('', True)
+        self._output_encoder.reset()
+
+        if not raw_data:
+            return
+
+        self._output_buf.append(raw_data)
+        self._add_writer()
+
+    def write(self, data: str) -> None:
+
+        raw_data = self._output_encoder.encode(data, True)
+        self._output_encoder.reset()
+
+        if not raw_data:
+            return
+
+        self._output_buf.append(raw_data)
+        self._add_writer()
+
+
+class _CmdLineInput:
+
+    def __init__(self, loop: AbstractEventLoop, protocol: BaseProtocol,
+                 input_: _File, echo: _File, shared: bool) -> None:
+
+        super().__init__()
+
         self._loop = loop
+        self._protocol = protocol
+        self._input = input_
+        self._echo = echo
+        self._shared = shared
+
+    def close(self) -> None:
+
+        self._loop = None
+        self._input = None
+        self._echo = None
+
+
+class TerminalInput(_CmdLineInput):
+
+    def __init__(self, loop: AbstractEventLoop, protocol: BaseProtocol,
+                 input_: _File, echo: _File, shared: bool) -> None:
+
+        super().__init__(loop=loop, protocol=protocol,
+                         input_=input_, echo=echo, shared=shared)
+
+        decoder_factory = codecs.getincrementaldecoder(self._input.encoding)
+        self._input_decoder = decoder_factory(errors='ignore')
+        self._input_buf = []
+
+        self._saved_attr = termios.tcgetattr(self._input.fd)
+        attr = termios.tcgetattr(self._input.fd)
+        attr[3] &= ~termios.ICANON
+        attr[6][termios.VMIN] = 1
+        attr[6][termios.VTIME] = 0
+        termios.tcsetattr(self._input.fd, termios.TCSADRAIN, attr)
+
+        self._terminal = blessed.Terminal(stream=self._echo.text)
+
+        self._loop.call_soon(self._add_reader)
+
+    def close(self) -> None:
+
+        termios.tcsetattr(self._input.fd, termios.TCSAFLUSH, self._saved_attr)
+
+        super().close()
+
+    def _add_reader(self) -> None:
+
+        try:
+            self._loop.add_reader(self._input.fd, self._input_available)
+
+        except PermissionError:
+            # FIXME: handle case when file descriptor cannot be watched
+            pass
+
+    def _input_available(self) -> None:
+
+        raw_buf = os.read(self._input.fd, 4096)
+
+        while True:
+            raw_line, sep, raw_buf = raw_buf.partition(b'\n')
+
+            if not sep:
+                break
+
+            self._input_buf.append(self._input_decoder.decode(raw_line, True))
+            self._input_decoder.reset()
+
+            self._loop.call_soon(self._protocol.data_received,
+                                 ''.join(self._input_buf))
+            self._input_buf.clear()
+
+        if not raw_line:
+            return
+
+        self._input_buf.append(self._input_decoder.decode(raw_line, False))
 
 
 @coroutine
 def connect_console(
         protocol_factory,
         loop: AbstractEventLoop,
-        input_factory=DumbInput,
-        output_factory=DumbOutput,
+        input_factory: Type[_CmdLineInput] = TerminalInput,
+        output_factory: Type[_CmdLineOutput] = DumbOutput,
 ) -> Tuple[BaseTransport, Protocol]:
 
-    output_handler = output_factory(loop=loop)
-    input_handler = input_factory(loop=loop)
+    import sys
+    input_file = _File(sys.__stdin__, mode='r', non_blocking=True)
+    output_file = _File(sys.__stdout__, mode='w')
+
+    if not input_file.isatty:
+        raise NotImplementedError("can only handle TTYs for now")
+
+    if input_file == output_file:
+        echo_file = output_file
+        shared = True
+
+    else:
+        echo_file = _File(input_file.tty_file(mode='w'), mode='w')
+        shared = False
+
+    output_handler = output_factory(loop=loop, output=output_file)
+
     transport = _CmdLineTransport(
         loop=loop,
         protocol=protocol_factory(),
         input_handler=input_handler,
         output_handler=output_handler,
     )
+
+    input_handler = input_factory(loop=loop, input_=input_file, echo=echo_file)
+
     return transport, transport.get_protocol()
 
 
