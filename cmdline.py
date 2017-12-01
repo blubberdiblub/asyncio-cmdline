@@ -513,24 +513,50 @@ class _CmdLineTransport(Transport):
 
 class _CmdLineOutput:
 
-    def __init__(self, loop: AbstractEventLoop, output: _File) -> None:
+    def __init__(self,
+                 protocol_factory: Type[Protocol],
+                 loop: AbstractEventLoop,
+                 output: _File,
+                 ) -> None:
 
         super().__init__()
 
+        self._protocol_factory = protocol_factory
+        self._protocol = None
         self._loop = loop
         self._output = output
 
+    def get_protocol(self) -> Optional[Protocol]:
+
+        return self._protocol
+
+    def open(self) -> None:
+
+        if self._protocol is not None:
+            raise RuntimeError(f"{self.__class__.__name__} already opened")
+
+        self._protocol = self._protocol_factory()
+        self._loop.call_soon(self._protocol.connection_made, self)
+
     def close(self) -> None:
 
-        self._loop = None
-        self._output = None
+        if self._protocol is None:
+            return
+
+        self._loop.call_soon(self._protocol.connection_lost, None)
+        self._protocol = None
 
 
 class DumbOutput(_CmdLineOutput):
 
-    def __init__(self, loop: AbstractEventLoop, output: _File) -> None:
+    def __init__(self,
+                 protocol_factory: Type[Protocol],
+                 loop: AbstractEventLoop,
+                 output: _File,
+                 ) -> None:
 
-        super().__init__(loop=loop, output=output)
+        super().__init__(protocol_factory=protocol_factory, loop=loop,
+                         output=output)
 
         encoder_factory = codecs.getincrementalencoder(self._output.encoding)
         self._output_encoder = encoder_factory(errors='ignore')
@@ -615,30 +641,55 @@ class DumbOutput(_CmdLineOutput):
 
 class _CmdLineInput:
 
-    def __init__(self, loop: AbstractEventLoop, protocol: BaseProtocol,
-                 input_: _File, echo: _File, shared: bool) -> None:
+    def __init__(self,
+                 protocol_factory: Type[Protocol],
+                 loop: AbstractEventLoop,
+                 input_: _File,
+                 echo: _File,
+                 shared: bool
+                 ) -> None:
 
         super().__init__()
 
+        self._protocol_factory = protocol_factory
+        self._protocol = None
         self._loop = loop
-        self._protocol = protocol
         self._input = input_
         self._echo = echo
         self._shared = shared
 
+    def get_protocol(self) -> Optional[Protocol]:
+
+        return self._protocol
+
+    def open(self) -> None:
+
+        if self._protocol is not None:
+            raise RuntimeError(f"{self.__class__.__name__} already opened")
+
+        self._protocol = self._protocol_factory()
+        self._loop.call_soon(self._protocol.connection_made, self)
+
     def close(self) -> None:
 
-        self._loop = None
-        self._input = None
-        self._echo = None
+        if self._protocol is None:
+            return
+
+        self._loop.call_soon(self._protocol.connection_lost, None)
+        self._protocol = None
 
 
 class TerminalInput(_CmdLineInput):
 
-    def __init__(self, loop: AbstractEventLoop, protocol: BaseProtocol,
-                 input_: _File, echo: _File, shared: bool) -> None:
+    def __init__(self,
+                 protocol_factory: Type[Protocol],
+                 loop: AbstractEventLoop,
+                 input_: _File,
+                 echo: _File,
+                 shared: bool
+                 ) -> None:
 
-        super().__init__(loop=loop, protocol=protocol,
+        super().__init__(protocol_factory=protocol_factory, loop=loop,
                          input_=input_, echo=echo, shared=shared)
 
         decoder_factory = codecs.getincrementaldecoder(self._input.encoding)
@@ -718,6 +769,7 @@ def connect_console(
         shared = False
 
     output_handler = output_factory(loop=loop, output=output_file)
+    input_handler = input_factory(loop=loop, input_=input_file, echo=echo_file)
 
     transport = _CmdLineTransport(
         loop=loop,
@@ -725,8 +777,6 @@ def connect_console(
         input_handler=input_handler,
         output_handler=output_handler,
     )
-
-    input_handler = input_factory(loop=loop, input_=input_file, echo=echo_file)
 
     return transport, transport.get_protocol()
 
