@@ -1,10 +1,20 @@
+# automatically generated version file
+/version.py
 
-*.log
+# compiled Python files
 *.pyc
 *.pyo
 __pycache__/
 
-/.idea/
-
+# ancillary directories
+/*.egg-info
+/build/
+/dist/
 /venv/
 
+# ancillary files
+/.coverage
+*.log
+
+# IDE directories
+/.idea/
