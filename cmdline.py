@@ -321,196 +321,6 @@ class _File:
                     errors='replace')
 
 
-class _CmdLineTransport(Transport):
-    def __init__(self,
-                 loop: AbstractEventLoop,
-                 protocol: Protocol,
-                 input_handler,
-                 output_handler,
-                 ) -> None:
-
-        super().__init__()
-
-        self._loop = loop
-        self._protocol = protocol
-
-        import sys
-        self._input = _File(sys.__stdin__, mode='r', non_blocking=True)
-        self._output = _File(sys.__stdout__, mode='w')
-
-        self._input_decoder = codecs.getincrementaldecoder(self._input.encoding)(errors='ignore')
-        self._input_buf = []
-
-        self._output_encoder = codecs.getincrementalencoder(self._output.encoding)(errors='ignore')
-        self._output_buf = deque()
-
-        self._saved_attr = None
-        self._terminal = None
-        self._shared = False
-        self._echo = None
-
-        if self._input.isatty:
-            self._saved_attr = termios.tcgetattr(self._input.fd)
-            attr = termios.tcgetattr(self._input.fd)
-            attr[3] &= ~termios.ICANON
-            attr[6][termios.VMIN] = 1
-            attr[6][termios.VTIME] = 0
-            termios.tcsetattr(self._input.fd, termios.TCSADRAIN, attr)
-
-            if self._input == self._output:
-                self._terminal = blessed.Terminal()
-                self._shared = True
-
-            else:
-                self._terminal = blessed.Terminal(
-                        stream=self._input.tty_file(mode='w'),
-                )
-
-            self._echo = _File(self._terminal.stream, mode='w')
-
-        self._loop.call_soon(self._protocol.connection_made, self)
-        self._loop.call_soon(self._add_reader)
-
-    def _add_reader(self) -> None:
-
-        try:
-            self._loop.add_reader(self._input.fd, self._input_available)
-
-        except PermissionError:
-            # FIXME: handle case when file descriptor cannot be watched
-            pass
-
-    def _add_writer(self) -> None:
-
-        try:
-            import sys
-            print("adding writer", file=sys.stderr, flush=True)
-
-            self._loop.add_writer(self._output.fd, self._output_available)
-
-        except PermissionError:
-            # FIXME: handle case when file descriptor cannot be watched
-
-            import sys
-            print("output file descriptor cannot be watched", file=sys.stderr, flush=True)
-
-    def _input_available(self) -> None:
-
-        raw_buf = os.read(self._input.fd, 4096)
-
-        while True:
-            raw_line, sep, raw_buf = raw_buf.partition(b'\n')
-
-            if not sep:
-                break
-
-            self._input_buf.append(self._input_decoder.decode(raw_line, True))
-            self._input_decoder.reset()
-
-            self._loop.call_soon(self._protocol.data_received,
-                                 ''.join(self._input_buf))
-            self._input_buf.clear()
-
-        if not raw_line:
-            return
-
-        self._input_buf.append(self._input_decoder.decode(raw_line, False))
-
-    def _output_available(self) -> None:
-
-        if not self._output_buf:
-            self._loop.remove_writer(self._output.fd)
-
-            import sys
-            print("fsync", file=sys.stderr, flush=True)
-
-            try:
-                os.fsync(self._output.fd)
-
-            except OSError:
-                pass
-
-            return
-
-        raw_data = self._output_buf.popleft()
-        if not raw_data:
-            import sys
-            print("data empty", file=sys.stderr, flush=True)
-
-            return
-
-        bytes_written = os.write(self._output.fd, raw_data[:4096])
-        assert 0 <= bytes_written <= len(raw_data)
-
-        if bytes_written >= len(raw_data):
-            import sys
-            print(f"complete write ({bytes_written})", file=sys.stderr, flush=True)
-
-            return
-
-        import sys
-        print(f"incomplete write ({bytes_written})", file=sys.stderr, flush=True)
-
-        self._output_buf.appendleft(raw_data[bytes_written:])
-
-    def close(self) -> None:
-        self._protocol = None
-
-        if self._saved_attr:
-            termios.tcsetattr(self._input.fd,
-                              termios.TCSAFLUSH,
-                              self._saved_attr)
-
-    def is_closing(self) -> bool:
-        return self._protocol is None
-
-    def set_protocol(self, protocol: Protocol) -> None:
-        self._protocol = protocol
-
-    def get_protocol(self) -> Protocol:
-        return self._protocol
-
-    def get_write_buffer_size(self):
-        assert False
-
-    def set_write_buffer_limits(self, high=None, low=None):
-        assert False
-
-    def abort(self):
-        assert False
-
-    def can_write_eof(self) -> bool:
-        return True
-
-    def write_eof(self):
-
-        raw_data = self._output_encoder.encode('', True)
-        self._output_encoder.reset()
-
-        if not raw_data:
-            return
-
-        self._output_buf.append(raw_data)
-        self._add_writer()
-
-    def write(self, data: str) -> None:
-
-        raw_data = self._output_encoder.encode(data, True)
-        self._output_encoder.reset()
-
-        if not raw_data:
-            return
-
-        self._output_buf.append(raw_data)
-        self._add_writer()
-
-    def pause_reading(self):
-        assert False
-
-    def resume_reading(self):
-        assert False
-
-
 class _CmdLineOutput:
 
     def __init__(self,
@@ -743,6 +553,196 @@ class TerminalInput(_CmdLineInput):
             return
 
         self._input_buf.append(self._input_decoder.decode(raw_line, False))
+
+
+class _CmdLineTransport(Transport):
+    def __init__(self,
+                 loop: AbstractEventLoop,
+                 protocol: Protocol,
+                 input_handler: _CmdLineInput,
+                 output_handler: _CmdLineOutput,
+                 ) -> None:
+
+        super().__init__()
+
+        self._loop = loop
+        self._protocol = protocol
+
+        import sys
+        self._input = _File(sys.__stdin__, mode='r', non_blocking=True)
+        self._output = _File(sys.__stdout__, mode='w')
+
+        self._input_decoder = codecs.getincrementaldecoder(self._input.encoding)(errors='ignore')
+        self._input_buf = []
+
+        self._output_encoder = codecs.getincrementalencoder(self._output.encoding)(errors='ignore')
+        self._output_buf = deque()
+
+        self._saved_attr = None
+        self._terminal = None
+        self._shared = False
+        self._echo = None
+
+        if self._input.isatty:
+            self._saved_attr = termios.tcgetattr(self._input.fd)
+            attr = termios.tcgetattr(self._input.fd)
+            attr[3] &= ~termios.ICANON
+            attr[6][termios.VMIN] = 1
+            attr[6][termios.VTIME] = 0
+            termios.tcsetattr(self._input.fd, termios.TCSADRAIN, attr)
+
+            if self._input == self._output:
+                self._terminal = blessed.Terminal()
+                self._shared = True
+
+            else:
+                self._terminal = blessed.Terminal(
+                        stream=self._input.tty_file(mode='w'),
+                )
+
+            self._echo = _File(self._terminal.stream, mode='w')
+
+        self._loop.call_soon(self._protocol.connection_made, self)
+        self._loop.call_soon(self._add_reader)
+
+    def _add_reader(self) -> None:
+
+        try:
+            self._loop.add_reader(self._input.fd, self._input_available)
+
+        except PermissionError:
+            # FIXME: handle case when file descriptor cannot be watched
+            pass
+
+    def _add_writer(self) -> None:
+
+        try:
+            import sys
+            print("adding writer", file=sys.stderr, flush=True)
+
+            self._loop.add_writer(self._output.fd, self._output_available)
+
+        except PermissionError:
+            # FIXME: handle case when file descriptor cannot be watched
+
+            import sys
+            print("output file descriptor cannot be watched", file=sys.stderr, flush=True)
+
+    def _input_available(self) -> None:
+
+        raw_buf = os.read(self._input.fd, 4096)
+
+        while True:
+            raw_line, sep, raw_buf = raw_buf.partition(b'\n')
+
+            if not sep:
+                break
+
+            self._input_buf.append(self._input_decoder.decode(raw_line, True))
+            self._input_decoder.reset()
+
+            self._loop.call_soon(self._protocol.data_received,
+                                 ''.join(self._input_buf))
+            self._input_buf.clear()
+
+        if not raw_line:
+            return
+
+        self._input_buf.append(self._input_decoder.decode(raw_line, False))
+
+    def _output_available(self) -> None:
+
+        if not self._output_buf:
+            self._loop.remove_writer(self._output.fd)
+
+            import sys
+            print("fsync", file=sys.stderr, flush=True)
+
+            try:
+                os.fsync(self._output.fd)
+
+            except OSError:
+                pass
+
+            return
+
+        raw_data = self._output_buf.popleft()
+        if not raw_data:
+            import sys
+            print("data empty", file=sys.stderr, flush=True)
+
+            return
+
+        bytes_written = os.write(self._output.fd, raw_data[:4096])
+        assert 0 <= bytes_written <= len(raw_data)
+
+        if bytes_written >= len(raw_data):
+            import sys
+            print(f"complete write ({bytes_written})", file=sys.stderr, flush=True)
+
+            return
+
+        import sys
+        print(f"incomplete write ({bytes_written})", file=sys.stderr, flush=True)
+
+        self._output_buf.appendleft(raw_data[bytes_written:])
+
+    def close(self) -> None:
+        self._protocol = None
+
+        if self._saved_attr:
+            termios.tcsetattr(self._input.fd,
+                              termios.TCSAFLUSH,
+                              self._saved_attr)
+
+    def is_closing(self) -> bool:
+        return self._protocol is None
+
+    def set_protocol(self, protocol: Protocol) -> None:
+        self._protocol = protocol
+
+    def get_protocol(self) -> Protocol:
+        return self._protocol
+
+    def get_write_buffer_size(self):
+        assert False
+
+    def set_write_buffer_limits(self, high=None, low=None):
+        assert False
+
+    def abort(self):
+        assert False
+
+    def can_write_eof(self) -> bool:
+        return True
+
+    def write_eof(self):
+
+        raw_data = self._output_encoder.encode('', True)
+        self._output_encoder.reset()
+
+        if not raw_data:
+            return
+
+        self._output_buf.append(raw_data)
+        self._add_writer()
+
+    def write(self, data: str) -> None:
+
+        raw_data = self._output_encoder.encode(data, True)
+        self._output_encoder.reset()
+
+        if not raw_data:
+            return
+
+        self._output_buf.append(raw_data)
+        self._add_writer()
+
+    def pause_reading(self):
+        assert False
+
+    def resume_reading(self):
+        assert False
 
 
 @coroutine
