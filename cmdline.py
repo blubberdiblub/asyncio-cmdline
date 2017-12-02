@@ -747,7 +747,7 @@ class TerminalInput(_CmdLineInput):
 
 @coroutine
 def connect_console(
-        protocol_factory,
+        protocol_factory: Type[Protocol],
         loop: AbstractEventLoop,
         input_factory: Type[_CmdLineInput] = TerminalInput,
         output_factory: Type[_CmdLineOutput] = DumbOutput,
@@ -768,8 +768,11 @@ def connect_console(
         echo_file = _File(input_file.tty_file(mode='w'), mode='w')
         shared = False
 
-    output_handler = output_factory(loop=loop, output=output_file)
-    input_handler = input_factory(loop=loop, input_=input_file, echo=echo_file)
+    output_handler = output_factory(protocol_factory=Protocol, loop=loop,
+                                    output=output_file)
+    input_handler = input_factory(protocol_factory=Protocol, loop=loop,
+                                  input_=input_file, echo=echo_file,
+                                  shared=shared)
 
     transport = _CmdLineTransport(
         loop=loop,
