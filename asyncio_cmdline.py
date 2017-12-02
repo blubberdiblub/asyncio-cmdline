@@ -340,6 +340,10 @@ class _CmdLineOutput:
 
         return self._protocol
 
+    def set_protocol(self, protocol: Protocol) -> None:
+
+        raise NotImplementedError("setting protocol not implemented")
+
     def open(self) -> None:
 
         if self._protocol is not None:
@@ -355,6 +359,10 @@ class _CmdLineOutput:
 
         self._loop.call_soon(self._protocol.connection_lost, None)
         self._protocol = None
+
+    def is_closing(self) -> bool:
+
+        return self._protocol is None
 
 
 class DumbOutput(_CmdLineOutput):
