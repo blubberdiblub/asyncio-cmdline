@@ -16,26 +16,32 @@ VIRTUALENV := /usr/bin/virtualenv
 VENV_PIP := $(VENV)/bin/pip
 VENV_PYTHON := $(VENV)/bin/python
 
-PYFILES := $(wildcard $(PROJECT)/*.py $(PROJECT)/*/*.py $(PROJECT)/*/*/*.py)
+PYFILES := $(wildcard $(PROJECT).py $(PROJECT)/*.py $(PROJECT)/*/*.py $(PROJECT)/*/*/*.py)
 
 .PHONY: clean
 clean:
+	[ ! -d $(PROJECT) ] || $(FIND) $(PROJECT) -depth -type d -name '__pycache__' -delete
+	[ ! -d $(PROJECT) ] || $(FIND) $(PROJECT) -type f -name '*.py[co]' -delete
+	[ ! -d $(TESTS) ] || $(FIND) $(TESTS) -depth -type d -name '__pycache__' -delete
+	[ ! -d $(TESTS) ] || $(FIND) $(TESTS) -type f -name '*.py[co]' -delete
+	$(RM) -rf -- *.py[co] __pycache__ $(PROJECT).egg-info
 	$(SYSTEM_PYTHON) $(SETUP) clean --all
-	$(RM) -rf -- $(PROJECT).egg-info
-	$(FIND) $(PROJECT) $(TESTS) -type f -name '*.pyc' -delete
-	$(FIND) $(PROJECT) $(TESTS) -depth -type d -name '__pycache__' -delete
 
 .PHONY: cleanvenv
 cleanvenv:
 	$(RM) -rf -- $(VENV)
 
 $(VENV):
-	$(VIRTUALENV) --python=$(SYSTEM_PYTHON) $(VENV)
+	$(VIRTUALENV) --python=$(SYSTEM_PYTHON) --always-copy $(VENV)
 	$(VENV_PIP) install --upgrade coverage ipython pytest $(DEPENDENCIES)
 
 .PHONY: install
 install: $(VENV)
 	$(VENV_PIP) install --upgrade --force-reinstall .
+
+.PHONY: uninstall
+uninstall: $(VENV)
+	$(VENV_PIP) uninstall $(PROJECT)
 
 .PHONY: test
 test: $(VENV)
