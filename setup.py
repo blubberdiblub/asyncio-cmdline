@@ -137,18 +137,22 @@ if __name__ == '__main__':
                 'terminal',
             ],
             url='https://github.com/blubberdiblub/asyncio-cmdline/',
+            python_requires='>=3.4',
             install_requires=[
                 'blessed',
             ],
             # extras_require={
             #     },
             test_suite='tests',
-            packages=find_packages(exclude=[
-                'tests',
-                'tests.*',
-                '*.tests',
-                '*.tests.*',
-            ]),
+            py_modules=[
+                'asyncio_cmdline',
+            ],
+            # packages=find_packages(exclude=[
+            #     'tests',
+            #     'tests.*',
+            #     '*.tests',
+            #     '*.tests.*',
+            # ]),
             include_package_data=True,
             zip_safe=False,
             # entry_points={
