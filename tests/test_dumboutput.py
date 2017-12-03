@@ -6,7 +6,6 @@ from unittest import TestCase, main
 import asyncio
 
 from functools import partial
-from io import StringIO
 
 from . import state_recording
 
@@ -16,9 +15,10 @@ from .context import asyncio_cmdline
 class TestDumbOutput(TestCase):
 
     def setUp(self):
-        import sys
 
+        self.old_loop = asyncio.get_event_loop()
         self.loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(self.loop)
         self.recorded_output = state_recording.Output(loop=self.loop)
         self._file = asyncio_cmdline._File(self.recorded_output, mode='w')
         self.connect_future = self.loop.create_future()
@@ -34,7 +34,8 @@ class TestDumbOutput(TestCase):
 
         self.output.open()
         self.loop.run_until_complete(self.connect_future)
-        self.protocol = self.connect_future.result()
+        transport, self.protocol = self.connect_future.result()
+        assert self.output is transport
         assert self.output.get_protocol() is self.protocol
 
     def tearDown(self):
@@ -43,10 +44,10 @@ class TestDumbOutput(TestCase):
             self.output.close()
 
         self.loop.run_until_complete(self.disconnect_future)
-        assert self.disconnect_future.result() is self.protocol
+        assert self.disconnect_future.result() is None
         assert self.output.get_protocol() is None
 
-        assert not self.protocol.connected
+        assert self.protocol.state == self.protocol.STATE_DISCONNECTED
         assert self.protocol.transport is not None
         assert not self.protocol.paused
 
@@ -54,6 +55,9 @@ class TestDumbOutput(TestCase):
             raise self.protocol.exception
 
         self.recorded_output.close()  # FIXME: should not be necessary
+
+        self.loop.close()
+        asyncio.set_event_loop(self.old_loop)
 
     def test_let_it_dangle(self):
 
@@ -66,11 +70,14 @@ class TestDumbOutput(TestCase):
     def test_write(self):
 
         self.output.write("foobar\n")
+        self.output.write("blafasel")
         self.output.close()
         self.loop.run_until_complete(self.disconnect_future)
 
         self.recorded_output.close()
-        self.assertEqual(''.join(self.recorded_output.received), "foobar\n")
+        self.assertTrue(self.recorded_output.is_eof_last_only())
+        self.assertEqual(b''.join(self.recorded_output.data_sequence(0)),
+                         b"foobar\nblafasel")
 
 
 if __name__ == '__main__':

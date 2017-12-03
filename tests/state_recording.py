@@ -1,76 +1,91 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-from typing import Optional
+from typing import List, Optional
 
 import asyncio
-import errno
 import io
 import os
 
-from functools import partial
 
+class _ProtocolRecorder(asyncio.Protocol):
 
-class Protocol(asyncio.Protocol):
-
-    EOF = object()
+    (
+        STATE_UNCONNECTED,
+        STATE_CONNECTED,
+        STATE_DISCONNECTED,
+    ) = range(3)
 
     def __init__(self,
                  connect: asyncio.Future = None,
-                 disconnect: asyncio.Future = None) -> None:
+                 disconnect: asyncio.Future = None,
+                 *args, **kwargs) -> None:
 
-        super().__init__()
+        super().__init__(*args, **kwargs)
 
-        self.connected = False
+        class EOF:
+            pass
+
+        self.EOF = EOF()
+
+        self.state = self.STATE_UNCONNECTED
         self.transport = None
         self.exception = None
         self.paused = False
         self.received = []
 
-        self.connect_future = connect
-        self.disconnect_future = disconnect
+        self.connect = connect
+        self.disconnect = disconnect
 
     def connection_made(self, transport: asyncio.BaseTransport) -> None:
 
-        if self.connect_future is not None:
-            if transport is None:
-                self.connect_future.set_exception(
-                    ValueError("transport must not be None"))
-
-            else:
-                self.connect_future.set_result(self)
-
-        assert not self.connected
+        assert self.state == self.STATE_UNCONNECTED
         assert self.transport is None
         assert self.exception is None
         assert not self.paused
         assert not self.received
 
-        assert transport is not None
-
-        self.connected = True
+        self.state = self.STATE_CONNECTED
         self.transport = transport
+
+        if transport is None:
+            self.exception = ValueError("transport must not be None")
+
+            if self.connect is not None:
+                self.connect.set_exception(self.exception)
+
+            if self.disconnect is not None:
+                self.disconnect.cancel()
+
+            raise self.exception
+
+        if self.connect is None:
+            return
+
+        self.connect.set_result((transport, self))
 
     def connection_lost(self, exc: Optional[BaseException]) -> None:
 
-        if self.disconnect_future is not None:
-            if exc is None:
-                self.disconnect_future.set_result(self)
-
-            else:
-                self.disconnect_future.set_exception(exc)
-
-        assert self.connected
+        assert self.state == self.STATE_CONNECTED
         assert self.transport is not None
         assert self.exception is None
         assert not self.paused
 
-        self.connected = False
+        self.state = self.STATE_DISCONNECTED
         self.exception = exc
+
+        if self.disconnect is None:
+            return
+
+        if exc is None:
+            self.disconnect.set_result(exc)
+
+        else:
+            self.disconnect.set_exception(exc)
 
     def pause_writing(self) -> None:
 
-        assert self.connected
+        assert self.state == self.STATE_CONNECTED
         assert self.transport is not None
         assert self.exception is None
         assert not self.paused
@@ -79,16 +94,16 @@ class Protocol(asyncio.Protocol):
 
     def resume_writing(self) -> None:
 
-        assert self.connected
+        assert self.state == self.STATE_CONNECTED
         assert self.transport is not None
         assert self.exception is None
         assert self.paused
 
         self.paused = False
 
-    def data_received(self, data) -> None:
+    def data_received(self, data: bytes) -> None:
 
-        assert self.connected
+        assert self.state == self.STATE_CONNECTED
         assert self.transport is not None
         assert self.exception is None
         assert not self.paused
@@ -97,47 +112,70 @@ class Protocol(asyncio.Protocol):
 
     def eof_received(self) -> None:
 
-        assert self.connected
+        assert self.state == self.STATE_CONNECTED
         assert self.transport is not None
         assert self.exception is None
         assert not self.paused
 
         self.received.append(self.EOF)
 
+    def is_eof_last_only(self) -> bool:
 
-class Output(io.FileIO):
+        try:
+            return self.received.index(self.EOF) == len(self.received) - 1
 
-    def __init__(self, loop: asyncio.AbstractEventLoop) -> None:
+        except ValueError:
+            return False
 
-        self.EOF = object()
-        self.received = []
+    def data_sequence(self, idx: int) -> List[bytes]:
+
+        start = 0
+
+        for _ in range(idx):
+            start = self.received.index(self.EOF, start) + 1
+
+        try:
+            stop = self.received.index(self.EOF, start)
+
+        except ValueError:
+            return self.received[start:]
+
+        return self.received[start:stop]
+
+
+class Protocol(_ProtocolRecorder):
+
+    def __init__(self,
+                 connect: asyncio.Future = None,
+                 disconnect: asyncio.Future = None,
+                 *args, **kwargs) -> None:
+
+        super().__init__(connect=connect, disconnect=disconnect,
+                         *args, **kwargs)
+
+
+class Output(io.RawIOBase, _ProtocolRecorder):
+
+    def __init__(self,
+                 loop: asyncio.AbstractEventLoop,
+                 *args, **kwargs) -> None:
+
+        super().__init__(disconnect=loop.create_future(),
+                         *args, **kwargs)
 
         self._loop = loop
 
-        self._fd_read, _fd_write = os.pipe()
-        os.set_blocking(self._fd_read, False)
-        os.set_blocking(_fd_write, False)
+        fd_read, fd_write = os.pipe()
+        os.set_blocking(fd_read, False)
+        os.set_blocking(fd_write, False)
+        self._file_read = io.FileIO(fd_read, mode='r')
+        self._file_write = io.FileIO(fd_write, mode='w')
 
-        super().__init__(_fd_write, mode='w')
+        connect = self._loop.connect_read_pipe(lambda: self, self._file_read)
+        transport, protocol = self._loop.run_until_complete(connect)
 
         import sys
-        print(f"#{_fd_write}: closefd = {self.closefd}", file=sys.stderr)
-
-        class _Protocol(asyncio.Protocol):
-
-            def __init__(self, output: Output):
-
-                self._output = output
-
-            def data_received(self, data):
-
-                self._output.received.append(data)
-
-            def eof_received(self):
-
-                self._output.received.append(self._output.EOF)
-
-        self._loop.connect_read_pipe(partial(_Protocol, self), self._fd_read)
+        print(f"transport={transport!r}, protocol={protocol!r}", file=sys.stderr)
 
     def close(self) -> None:
 
@@ -145,9 +183,40 @@ class Output(io.FileIO):
             return
 
         super().close()
+        assert self.closed
 
-        # FIXME: read remaining data
-        os.close(self._fd_read)
+        self._file_write.close()
+
+        assert self.disconnect is not None
+        self._loop.run_until_complete(self.disconnect)
+        assert self.disconnect.result() is None
+
+        self._file_read.close()
+
+    def fileno(self) -> int:
+
+        self._checkClosed()
+        return self._file_write.fileno()
+
+    def flush(self) -> None:
+
+        self._checkClosed()
+        self._file_write.flush()
+
+    def isatty(self) -> bool:
+
+        self._checkClosed()
+        return self._file_write.isatty()
+
+    def writable(self) -> bool:
+
+        self._checkClosed()
+        return True
+
+    def write(self, b: bytes) -> int:
+
+        self._checkClosed()
+        return self._file_write.write(b)
 
     # def write(self, b: bytes) -> int:
     #
