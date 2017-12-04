@@ -79,6 +79,20 @@ class TestDumbOutput(TestCase):
         self.assertEqual(b''.join(self.recorded_output.data_sequence(0)),
                          b"foobar\nblafasel")
 
+    def test_extra_eof(self):
+
+        self.output.write("first\n")
+        self.output.write_eof()
+        self.output.write("intermediate\n")
+        self.output.write_eof()
+        self.output.write_eof()
+        self.output.write("last\n")
+        self.output.close()
+        self.loop.run_until_complete(self.disconnect_future)
+
+        self.recorded_output.close()
+        self.assertTrue(self.recorded_output.is_eof_last_only())
+
 
 if __name__ == '__main__':
     main()
